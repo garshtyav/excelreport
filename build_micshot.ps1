@@ -1441,20 +1441,6 @@ Public Sub OpenSendConfig()
     Shell "notepad.exe """ & cfg & """", vbNormalFocus
 End Sub
 
-Private Function BytesToUtf8(ByRef b() As Byte) As String
-    On Error Resume Next
-    Dim st As Object
-    Set st = CreateObject("ADODB.Stream")
-    st.Type = 1
-    st.Open
-    st.Write b
-    st.Position = 0
-    st.Type = 2
-    st.Charset = "utf-8"
-    BytesToUtf8 = st.ReadText
-    st.Close
-End Function
-
 Private Sub LoadSendConfig(ByRef endpoint As String, ByRef auth As String, ByRef token As String, _
                            ByRef login As String, ByRef password As String, ByRef headerName As String, _
                            ByRef project As String, ByRef fileField As String, _
@@ -1464,9 +1450,13 @@ Private Sub LoadSendConfig(ByRef endpoint As String, ByRef auth As String, ByRef
     endpoint = "": auth = "none": token = "": login = "": password = ""
     headerName = "X-API-Key": project = "": fileField = "file"
     timeoutSec = 120: retryCount = 3: retryDelay = 5: backoff = 2
-    Dim f As Integer, s As String
+    Dim f As Integer, s As String, cfgPath As String
+    cfgPath = Environ$("APPDATA") & "\MicShot\send_config.txt"
+    ' файл отсутствует = все значения по умолчанию (иначе Do/EOF на
+    ' неоткрытом канале с Resume Next зацикливается навсегда)
+    If Len(Dir$(cfgPath)) = 0 Then Exit Sub
     f = FreeFile
-    Open Environ$("APPDATA") & "\MicShot\send_config.txt" For Input As #f
+    Open cfgPath For Input As #f
     Do While Not EOF(f)
         Line Input #f, s
         s = Trim$(s)
@@ -1632,7 +1622,7 @@ Private Sub BuildCaseBody(ByVal zipPath As String, ByVal fileField As String, _
     CopyMemory body(nPre), zipBytes(1), nZip
     CopyMemory body(nPre + nZip), postB(0), nPost
     outBytes = body
-    Exit Function
+    Exit Sub
 fail:
 End Sub
 
@@ -1652,9 +1642,16 @@ Private Function PostCaseZip(ByVal endpoint As String, ByRef body() As Byte, _
     http.SetRequestHeader "User-Agent", "MicShot/" & APP_VERSION
     http.Send body
     httpStatus = http.Status
-    Dim respBytes() As Byte
-    respBytes = http.ResponseBody
-    PostCaseZip = BytesToUtf8(respBytes)
+    Dim st As Object
+    Set st = CreateObject("ADODB.Stream")
+    st.Type = 1
+    st.Open
+    st.Write http.ResponseBody
+    st.Position = 0
+    st.Type = 2
+    st.Charset = "utf-8"
+    PostCaseZip = st.ReadText
+    st.Close
     Exit Function
 eh:
     If Err.Number = 12029 Or Err.Number = -2147012867 Or Err.Number = 12002 Or Err.Number = -2147012894 Then

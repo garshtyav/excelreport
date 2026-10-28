@@ -154,6 +154,23 @@ for nm, places in procs.items():
         if len(ls) > 1:
             problems.append(s + ": ПРОЦЕДУРА '" + nm + "' определена " + str(len(ls)) + " раз (строки " + str(ls) + ")")
 
+# Exit Function в Sub / Exit Sub в Function = compile error
+for src_name, code in sources:
+    _cur = None
+    for idx, line in enumerate(code.split('\n'), 1):
+        s = line.strip()
+        m2 = re.match(r'(?:Public |Private )?(Sub|Function)\s+(\w+)', s)
+        if m2 and 'Declare' not in s:
+            _cur = m2.group(1)
+            continue
+        if re.match(r'End (Sub|Function)', s):
+            _cur = None
+            continue
+        if _cur == 'Sub' and 'Exit Function' in s:
+            problems.append(src_name + ": Exit Function внутри Sub (строка " + str(idx) + "): " + s[:60])
+        if _cur == 'Function' and re.search(r'Exit Sub', s):
+            problems.append(src_name + ": Exit Sub внутри Function (строка " + str(idx) + "): " + s[:60])
+
 # ByVal-массивы запрещены VBA ("Array argument must be ByRef" / ByRef mismatch)
 for src_name, code in sources:
     for idx, line in enumerate(code.split('\n'), 1):

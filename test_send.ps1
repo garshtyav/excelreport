@@ -32,11 +32,15 @@ try {
     New-Item -ItemType Directory -Path $logDir | Out-Null
     $job = Start-Job -ArgumentList $port, $logDir -ScriptBlock {
         param($port, $logDir)
+        $trace = Join-Path $logDir 'srvtrace.log'
+        "start" | Set-Content $trace
         $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $port)
         $listener.Start()
         try {
             for ($n = 1; $n -le 3; $n++) {
+                "wait accept #$n" | Add-Content $trace
                 $client = $listener.AcceptTcpClient()
+                "accepted #$n" | Add-Content $trace
                 $stream = $client.GetStream()
                 # читаем сырые байты до CRLFCRLF (заголовки), остальное - тело
                 $buf = [System.Collections.Generic.List[byte]]::new()
@@ -50,6 +54,7 @@ try {
                         if ($buf[$i-3] -eq 13 -and $buf[$i-2] -eq 10 -and $buf[$i-1] -eq 13 -and $buf[$i] -eq 10) { $hdrEnd = $i + 1; break }
                     }
                 }
+                "headers ok #$n" | Add-Content $trace
                 $hdrText = [System.Text.Encoding]::ASCII.GetString($buf.GetRange(0, $hdrEnd).ToArray())
                 $clen = 0
                 foreach ($h in ($hdrText -split "`r`n")) {
@@ -75,6 +80,7 @@ try {
                     if ($h -like 'X-Test-Key:*') { $auth = $h.Substring(11).Trim() }
                     if ($h -like 'Content-Type:*') { $ctype = $h.Substring(13).Trim() }
                 }
+                "body ok #$n clen=$clen zip=$zipOff" | Add-Content $trace
                 @{ n = $n; auth = $auth; bodyLen = $clen; zipOff = $zipOff; ctype = $ctype } |
                     ConvertTo-Json | Set-Content (Join-Path $logDir ("req{0}.json" -f $n))
                 $code = 500; $respBody = '{"error":"try again"}'
@@ -123,7 +129,7 @@ retry_backoff=1
         if ($r1.auth -ne 'secret123') { throw "заголовок X-Test-Key не дошёл: '$($r1.auth)'" }
         if ($r2.auth -ne 'secret123') { throw "заголовок X-Test-Key не дошёл на повторе" }
         if ($r1.zipOff -le 0 -or $r2.zipOff -le 0) { throw "zip-сигнатура не найдена в теле (req1=$($r1.zipOff), req2=$($r2.zipOff))" }
-        if ($r1.bodyLen -lt 2000) { throw "тело подозрительно мало: $($r1.bodyLen)" }
+        if ($r1.bodyLen -lt 800) { throw "тело подозрительно мало: $($r1.bodyLen)" }   # zip 544 + поля кейса
         if ($r2.ctype -notlike 'multipart/form-data; boundary=*') { throw "Content-Type не multipart: $($r2.ctype)" }
         Write-Host ("PASS: обе попытки дошли (auth=X-Test-Key, zip в теле с offset {0}, {1} байт)" -f $r2.zipOff, $r2.bodyLen)
 
